@@ -5,6 +5,8 @@ import numpy as np
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import os
+import cv2
+import time
 
 # Simulated Model for Demonstration
 class SimulatedSustainabilityModel(torch.nn.Module):
@@ -68,6 +70,32 @@ def annotate_image(image_path, material_probs, sustainability_index):
     image.show()
     print(f"Annotated image saved as {annotated_path}")
 
+# Capture Image
+def capture_image_from_camera():
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        messagebox.showerror("Error", "Could not open webcam.")
+        return None
+
+    messagebox.showinfo("Info", "Press 's' to capture image, or 'q' to cancel.")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        cv2.imshow('Capture Image (press s to save, q to quit)', frame)
+        key = cv2.waitKey(1)
+        if key == ord('s'):
+            captured_path = 'captured_product.jpg'
+            cv2.imwrite(captured_path, frame)
+            break
+        elif key == ord('q'):
+            captured_path = None
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    return captured_path
+
 # Select Image File
 def select_image_file():
     root = tk.Tk()
@@ -85,8 +113,17 @@ def select_image_file():
 
 # Main Processing
 def process_image():
+    root = tk.Tk()
+    root.withdraw()
+
+    choice = messagebox.askquestion("Select Image Source", "Would you like to capture an image from your webcam? (Click 'No' to upload instead)")
+
     # Load Image
-    image_path = select_image_file()
+    if choice == 'yes':
+        image_path = capture_image_from_camera()
+    else:
+        image_path = select_image_file()
+    
     if not image_path or not os.path.exists(image_path):
         messagebox.showerror("Error", "Invalid or no image file selected.")
         return
