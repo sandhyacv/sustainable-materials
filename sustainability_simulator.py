@@ -20,14 +20,35 @@ class SimulatedSustainabilityModel(torch.nn.Module):
         sustainability_index = torch.sigmoid(torch.randn(1)) * 100
         return material_probs, sustainability_index.item()
 
+# Annotate with Background
+def draw_text_with_bg(draw, position, text, font, padding=6):
+    x, y = position
+
+    text_bbox = draw.textbbox((x, y), text, font=font)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+
+    bg_box = (
+        x - padding,
+        y - padding,
+        x + text_width + padding,
+        y + text_height + padding
+    )
+    draw.rectangle(bg_box, fill=(0, 0, 0, 220))
+
+    draw.text((x, y), text, fill="white", font=font)
+
 # Annotate Image with Predictions
 def annotate_image(image_path, material_probs, sustainability_index):
     # Load Image
     image = Image.open(image_path).convert('RGB')
     draw = ImageDraw.Draw(image)
 
+    # Dynamically scale font
+    width, height = image.size
+    font_size = max(20, height // 25)
     try:
-        font = ImageFont.truetype('arial.ttf', size=20)
+        font = ImageFont.truetype('arial.ttf', size=font_size)
     except:
         font = ImageFont.load_default()
     
@@ -35,11 +56,11 @@ def annotate_image(image_path, material_probs, sustainability_index):
     y_offset = 10
     for i, material in enumerate(['Plastic', 'Metal', 'Organic']):
         text = f"{material}: {material_probs[i]*100:.2f}"
-        draw.text((10, y_offset), text, fill='white', font=font)
-        y_offset += 30
-    
+        draw_text_with_bg(draw, (10, y_offset), text, font)
+        y_offset += font_size + 14
+
     text = f"Sustainability Index: {sustainability_index:.2f}"
-    draw.text((10, y_offset), text, fill='white', font=font)
+    draw_text_with_bg(draw, (10, y_offset), text, font)
 
     # Save Annotated Image
     annotated_path = "annotated_product.jpg"
@@ -53,7 +74,12 @@ def select_image_file():
     root.withdraw()
     file_path = filedialog.askopenfilename(
         title="Select a Product Image",
-        filetypes=[('JPEG files', '*.jpg *.jpeg'), ('PNG files', '*.png')]
+        filetypes=[
+            ('Image files', '*.jpg *.jpeg *.png *.webp'),
+            ('JPEG files', '*.jpg *.jpeg'),
+            ('PNG files', '*.png'),
+            ('WebP files', '*.webp')
+        ]
     )
     return file_path
 
