@@ -1,16 +1,79 @@
 import sys
 import cv2
+from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QTabWidget,
-    QVBoxLayout, QHBoxLayout, QFileDialog, QGroupBox, QTextEdit, QDateEdit
+    QVBoxLayout, QHBoxLayout, QFileDialog, QGroupBox, QTextEdit, QDateEdit, QMessageBox
 )
 from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import QDate, Qt, QTimer, QRect
+from PyQt5.QtCore import QDate, Qt, QTimer
+
+
+def resize_with_aspect_ratio(image, max_width=800, max_height=600):
+    h, w = image.shape[:2]
+    aspect_ratio = w / h
+
+    if w > max_width or h > max_height:
+        if aspect_ratio > (max_width / max_height):
+            new_w = max_width
+            new_h = int(max_width / aspect_ratio)
+        else:
+            new_h = max_height
+            new_w = int(max_height * aspect_ratio)
+        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return image
+
+
+def draw_annotations(image, lines):
+    image = resize_with_aspect_ratio(image)
+    h, w, _ = image.shape
+
+    scale = max(0.5, min(1.5, h / 600))
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    thickness = max(1, int(scale * 2))
+    line_gap = int(30 * scale)
+
+    sizes = [cv2.getTextSize(text, font, scale, thickness)[0] for text in lines]
+    text_width = max(size[0] for size in sizes)
+    text_height = sum(size[1] for size in sizes) + line_gap // 2 * (len(lines) - 1)
+
+    margin = 10
+    x0 = w - text_width - margin * 2
+    y0 = h - text_height - margin * 2
+
+    x0 = max(margin, x0)
+    y0 = max(margin, y0)
+
+    cv2.rectangle(
+        image,
+        (x0 - margin, y0 - margin),
+        (x0 + text_width + margin, y0 + text_height + margin),
+        (0, 0, 0),
+        thickness=cv2.FILLED,
+    )
+
+    y_cursor = y0 + sizes[0][1]
+    for idx, text in enumerate(lines):
+        cv2.putText(
+            image,
+            text,
+            (x0, y_cursor),
+            font,
+            scale,
+            (255, 255, 255),
+            thickness,
+            cv2.LINE_AA,
+        )
+        if idx < len(lines) - 1:
+            y_cursor += sizes[idx + 1][1] + line_gap // 2
+
+    return image
 
 
 class UploadAnalyzeTab(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, date_selector: QDateEdit, parent=None):
         super().__init__(parent)
+        self.date_selector = date_selector
         self.init_ui()
 
     def init_ui(self):
@@ -36,7 +99,7 @@ class UploadAnalyzeTab(QWidget):
         layout.addWidget(self.result_text)
 
         self.btn_select.clicked.connect(self.load_image)
-        self.btn_analyze.clicked.connect(self.dummy_analysis)
+        self.btn_analyze.clicked.connect(self.run_analysis)
 
     def load_image(self):
         fname, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
@@ -46,19 +109,50 @@ class UploadAnalyzeTab(QWidget):
             self.image_label.setPixmap(pix)
             self.result_text.setText("Material: -\nComposition: -\nSustainability Index: -")
 
-    def dummy_analysis(self):
-        if hasattr(self, 'current_image_path'):
-            self.result_text.setText("Material: Steel\nComposition: Fe, C\nSustainability Index: 0.041")
+    def run_analysis(self):
+        if not hasattr(self, 'current_image_path'):
+            QMessageBox.information(self, "No image", "Please upload an image first.")
+            return
+
+        material = "Steel"
+        composition = "Fe, C"
+        index = "0.041"
+        self.result_text.setText(f"Material: {material}\nComposition: {composition}\nSustainability Index: {index}")
+
+        image = cv2.imread(self.current_image_path)
+        if image is None:
+            QMessageBox.warning(self, "Load Error", "Failed to read the image file.")
+            return
+
+        lines = [
+            f"Material: {material}",
+            f"Composition: {composition}",
+            f"Sustainability Index: {index}",
+            f"Date: {self.date_selector.date().toString('dd/MM/yyyy')}"
+        ]
+
+        annotated = draw_annotations(image, lines)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = f"analyzed_snapshots/annotated_upload_{timestamp}.jpg"
+        cv2.imwrite(out_path, annotated)
+
+        image_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+        h, w, ch = image_rgb.shape
+        qt_image = QImage(image_rgb.data, w, h, ch * w, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qt_image).scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(pixmap)
+        QMessageBox.information(self, "Saved", f"Annotated image saved as {out_path}")
 
 
 class CaptureAnalyzeTab(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, date_selector: QDateEdit, parent=None):
         super().__init__(parent)
+        self.date_selector = date_selector
         self.cap = None
         self.timer = QTimer(self)
         self.frame = None
         self.state = "stopped"
-        self.roi = None
         self.init_ui()
 
     def init_ui(self):
@@ -88,10 +182,10 @@ class CaptureAnalyzeTab(QWidget):
         self.btn_toggle_cam.clicked.connect(self.toggle_camera_or_snapshot)
         self.btn_crop.clicked.connect(self.crop_roi)
         self.timer.timeout.connect(self.update_frame)
-        self.btn_analyze.clicked.connect(self.dummy_analysis)
+        self.btn_analyze.clicked.connect(self.run_analysis)
 
     def toggle_camera_or_snapshot(self):
-        if self.state == "stopped" or self.state == "captured":
+        if self.state in {"stopped", "captured"}:
             self.cap = cv2.VideoCapture(0)
             if not self.cap.isOpened():
                 self.result_text.setText("Error: Cannot access webcam")
@@ -100,7 +194,6 @@ class CaptureAnalyzeTab(QWidget):
             self.timer.start(30)
             self.btn_toggle_cam.setText("Take Snapshot")
             self.state = "previewing"
-
         elif self.state == "previewing":
             self.timer.stop()
             if self.frame is not None:
@@ -119,8 +212,7 @@ class CaptureAnalyzeTab(QWidget):
     def display_image(self, frame):
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame_rgb.shape
-        bytes_per_line = ch * w
-        qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        qt_image = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qt_image).scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(pixmap)
 
@@ -130,17 +222,58 @@ class CaptureAnalyzeTab(QWidget):
             cv2.destroyWindow("Select ROI")
             if roi != (0, 0, 0, 0):
                 x, y, w, h = roi
-                cropped = self.frame[y:y+h, x:x+w]
-                self.display_image(cropped)
+                cropped = self.frame[y:y + h, x:x + w]
+                if cropped.size == 0:
+                    QMessageBox.warning(self, "Invalid ROI", "Selected area is empty.")
+                    return
+
+                min_w, min_h = 400, 300
+                ch, cw = cropped.shape[:2]
+                if cw < min_w or ch < min_h:
+                    scale_w = min_w / cw
+                    scale_h = min_h / ch
+                    scale = max(scale_w, scale_h)
+                    new_w, new_h = int(cw * scale), int(ch * scale)
+                    cropped = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
                 self.frame = cropped
+                self.display_image(cropped)
+
+
+    def run_analysis(self):
+        if self.frame is None:
+            QMessageBox.information(self, "No snapshot", "Please take a snapshot first.")
+            return
+
+        material = "Stainless Steel"
+        composition = "Fe, Cr, Ni"
+        index = "0.065"
+        self.result_text.setText(f"Material: {material}\nComposition: {composition}\nSustainability Index: {index}")
+
+        lines = [
+            f"Material: {material}",
+            f"Composition: {composition}",
+            f"Sustainability Index: {index}",
+            f"Date: {self.date_selector.date().toString('dd/MM/yyyy')}"
+        ]
+
+        annotated = draw_annotations(self.frame, lines)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = f"analyzed_snapshots/annotated_upload_{timestamp}.jpg"
+        cv2.imwrite(out_path, annotated)
+
+        self.display_image(annotated)
+        QMessageBox.information(self, "Saved", f"Annotated snapshot saved as {out_path}")
 
     def dummy_analysis(self):
-        self.result_text.setText("Material: Stainless Steel\nComposition: Fe, Cr, Ni\nSustainability Index: 0.065")
+        self.run_analysis()
 
 
 class TrainPredictTab(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, date_selector: QDateEdit, parent=None):
         super().__init__(parent)
+        self.date_selector = date_selector
         self.init_ui()
 
     def init_ui(self):
@@ -178,9 +311,34 @@ class TrainPredictTab(QWidget):
     def load_image_pred(self):
         fname, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
         if fname:
-            pix = QPixmap(fname).scaled(self.pred_image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.pred_image_label.setPixmap(pix)
-            self.pred_result.setText("Prediction: Steel\nSustainability Index: 0.041")
+            material = "Steel"
+            index = "0.041"
+            composition = "Fe, C"
+            self.pred_result.setText(f"Prediction: {material}\nSustainability Index: {index}")
+
+            image = cv2.imread(fname)
+            if image is None:
+                QMessageBox.warning(self, "Load Error", "Failed to read the image file.")
+                return
+
+            lines = [
+                f"Material: {material}",
+                f"Composition: {composition}",
+                f"Sustainability Index: {index}",
+                f"Date: {self.date_selector.date().toString('dd/MM/yyyy')}"
+            ]
+
+            annotated = draw_annotations(image, lines)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_path = f"analyzed_snapshots/annotated_upload_{timestamp}.jpg"
+            cv2.imwrite(out_path, annotated)
+
+            image_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+            h, w, ch = image_rgb.shape
+            qt_image = QImage(image_rgb.data, w, h, ch * w, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qt_image).scaled(self.pred_image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.pred_image_label.setPixmap(pixmap)
+            QMessageBox.information(self, "Saved", f"Annotated prediction saved as {out_path}")
 
     def dummy_train_model(self):
         self.train_log.append("Training started...")
@@ -201,18 +359,18 @@ class MainWindow(QMainWindow):
         header_layout = QHBoxLayout()
         title_label = QLabel("Sustainability Assessment")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold;")
-        date_edit = QDateEdit(QDate.currentDate())
-        date_edit.setDisplayFormat("dd/MM/yyyy")
-        date_edit.setCalendarPopup(True)
+        self.date_edit = QDateEdit(QDate.currentDate())
+        self.date_edit.setDisplayFormat("dd/MM/yyyy")
+        self.date_edit.setCalendarPopup(True)
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         header_layout.addWidget(QLabel("Date:"))
-        header_layout.addWidget(date_edit)
+        header_layout.addWidget(self.date_edit)
 
         tabs = QTabWidget()
-        tabs.addTab(UploadAnalyzeTab(), "Upload Assess")
-        tabs.addTab(CaptureAnalyzeTab(), "Capture Assess")
-        tabs.addTab(TrainPredictTab(), "Train Predict")
+        tabs.addTab(UploadAnalyzeTab(self.date_edit), "Upload Assess")
+        tabs.addTab(CaptureAnalyzeTab(self.date_edit), "Capture Assess")
+        tabs.addTab(TrainPredictTab(self.date_edit), "Train Predict")
 
         main_layout.addLayout(header_layout)
         main_layout.addWidget(tabs)
