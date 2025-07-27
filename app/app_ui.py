@@ -1,16 +1,14 @@
 import sys
 import cv2
 from datetime import datetime
-from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QTabWidget,
-    QVBoxLayout, QHBoxLayout, QFileDialog, QGroupBox, QTextEdit, QDateEdit, QMessageBox
     QVBoxLayout, QHBoxLayout, QFileDialog, QGroupBox, QTextEdit, QDateEdit, QMessageBox
 )
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import QDate, Qt, QTimer
 
-
+# utility: resize image while preserving aspect ratio
 def resize_with_aspect_ratio(image, max_width=800, max_height=600):
     h, w = image.shape[:2]
     aspect_ratio = w / h
@@ -26,10 +24,11 @@ def resize_with_aspect_ratio(image, max_width=800, max_height=600):
     return image
 
 
+# utility: overlay annotations onto image
 def draw_annotations(image, lines):
+    # dynamically scale annotation size
     image = resize_with_aspect_ratio(image)
     h, w, _ = image.shape
-
     scale = max(0.5, min(1.5, h / 600))
     font = cv2.FONT_HERSHEY_SIMPLEX
     thickness = max(1, int(scale * 2))
@@ -46,6 +45,7 @@ def draw_annotations(image, lines):
     x0 = max(margin, x0)
     y0 = max(margin, y0)
 
+    # black background to enhance readability
     cv2.rectangle(
         image,
         (x0 - margin, y0 - margin),
@@ -54,68 +54,7 @@ def draw_annotations(image, lines):
         thickness=cv2.FILLED,
     )
 
-    y_cursor = y0 + sizes[0][1]
-    for idx, text in enumerate(lines):
-        cv2.putText(
-            image,
-            text,
-            (x0, y_cursor),
-            font,
-            scale,
-            (255, 255, 255),
-            thickness,
-            cv2.LINE_AA,
-        )
-        if idx < len(lines) - 1:
-            y_cursor += sizes[idx + 1][1] + line_gap // 2
-
-    return image
-from PyQt5.QtCore import QDate, Qt, QTimer
-
-
-def resize_with_aspect_ratio(image, max_width=800, max_height=600):
-    h, w = image.shape[:2]
-    aspect_ratio = w / h
-
-    if w > max_width or h > max_height:
-        if aspect_ratio > (max_width / max_height):
-            new_w = max_width
-            new_h = int(max_width / aspect_ratio)
-        else:
-            new_h = max_height
-            new_w = int(max_height * aspect_ratio)
-        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    return image
-
-
-def draw_annotations(image, lines):
-    image = resize_with_aspect_ratio(image)
-    h, w, _ = image.shape
-
-    scale = max(0.5, min(1.5, h / 600))
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    thickness = max(1, int(scale * 2))
-    line_gap = int(30 * scale)
-
-    sizes = [cv2.getTextSize(text, font, scale, thickness)[0] for text in lines]
-    text_width = max(size[0] for size in sizes)
-    text_height = sum(size[1] for size in sizes) + line_gap // 2 * (len(lines) - 1)
-
-    margin = 10
-    x0 = w - text_width - margin * 2
-    y0 = h - text_height - margin * 2
-
-    x0 = max(margin, x0)
-    y0 = max(margin, y0)
-
-    cv2.rectangle(
-        image,
-        (x0 - margin, y0 - margin),
-        (x0 + text_width + margin, y0 + text_height + margin),
-        (0, 0, 0),
-        thickness=cv2.FILLED,
-    )
-
+    # render annotations line-by-line
     y_cursor = y0 + sizes[0][1]
     for idx, text in enumerate(lines):
         cv2.putText(
@@ -134,28 +73,30 @@ def draw_annotations(image, lines):
     return image
 
 
+# tab 1: upload image and analyse
 class UploadAnalyzeTab(QWidget):
     def __init__(self, date_selector: QDateEdit, parent=None):
-    def __init__(self, date_selector: QDateEdit, parent=None):
         super().__init__(parent)
-        self.date_selector = date_selector
         self.date_selector = date_selector
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
 
+        # image preview area
         self.image_label = QLabel("No image loaded")
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setFixedSize(400, 300)
         self.image_label.setStyleSheet("border: 1px solid gray;")
 
+        # upload and analyze buttons
         btn_layout = QHBoxLayout()
         self.btn_select = QPushButton("Upload Image")
         self.btn_analyze = QPushButton("Analyse")
         btn_layout.addWidget(self.btn_select)
         btn_layout.addWidget(self.btn_analyze)
 
+        # result display
         self.result_text = QLabel("Material: -\nComposition: -\nSustainability Index: -")
         self.result_text.setAlignment(Qt.AlignLeft)
         self.result_text.setStyleSheet("background-color: #f0f0f0; padding: 5px;")
@@ -164,10 +105,11 @@ class UploadAnalyzeTab(QWidget):
         layout.addLayout(btn_layout)
         layout.addWidget(self.result_text)
 
+        # button handlers
         self.btn_select.clicked.connect(self.load_image)
         self.btn_analyze.clicked.connect(self.run_analysis)
-        self.btn_analyze.clicked.connect(self.run_analysis)
 
+    # image picker
     def load_image(self):
         fname, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
         if fname:
@@ -176,6 +118,7 @@ class UploadAnalyzeTab(QWidget):
             self.image_label.setPixmap(pix)
             self.result_text.setText("Material: -\nComposition: -\nSustainability Index: -")
 
+    # placeholder analysis
     def run_analysis(self):
         if not hasattr(self, 'current_image_path'):
             QMessageBox.information(self, "No image", "Please upload an image first.")
@@ -212,11 +155,10 @@ class UploadAnalyzeTab(QWidget):
         QMessageBox.information(self, "Saved", f"Annotated image saved as {out_path}")
 
 
+# tab 2: capture image using webcam and analyze
 class CaptureAnalyzeTab(QWidget):
     def __init__(self, date_selector: QDateEdit, parent=None):
-    def __init__(self, date_selector: QDateEdit, parent=None):
         super().__init__(parent)
-        self.date_selector = date_selector
         self.date_selector = date_selector
         self.cap = None
         self.timer = QTimer(self)
@@ -227,11 +169,13 @@ class CaptureAnalyzeTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
+        # live webcam preview
         self.image_label = QLabel("No image captured")
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setFixedSize(400, 300)
         self.image_label.setStyleSheet("border: 1px solid gray;")
 
+        # camera controls
         btn_layout = QHBoxLayout()
         self.btn_toggle_cam = QPushButton("Start Camera")
         self.btn_crop = QPushButton("Crop Snapshot")
@@ -240,6 +184,7 @@ class CaptureAnalyzeTab(QWidget):
         btn_layout.addWidget(self.btn_crop)
         btn_layout.addWidget(self.btn_analyze)
 
+        # result display
         self.result_text = QLabel("Material: -\nComposition: -\nSustainability Index: -")
         self.result_text.setAlignment(Qt.AlignLeft)
         self.result_text.setStyleSheet("background-color: #f0f0f0; padding: 5px;")
@@ -248,14 +193,14 @@ class CaptureAnalyzeTab(QWidget):
         layout.addLayout(btn_layout)
         layout.addWidget(self.result_text)
 
+        # button handlers
         self.btn_toggle_cam.clicked.connect(self.toggle_camera_or_snapshot)
         self.btn_crop.clicked.connect(self.crop_roi)
         self.timer.timeout.connect(self.update_frame)
         self.btn_analyze.clicked.connect(self.run_analysis)
-        self.btn_analyze.clicked.connect(self.run_analysis)
 
+    # toggle between live preview / snapshot
     def toggle_camera_or_snapshot(self):
-        if self.state in {"stopped", "captured"}:
         if self.state in {"stopped", "captured"}:
             self.cap = cv2.VideoCapture(0)
             if not self.cap.isOpened():
@@ -274,20 +219,22 @@ class CaptureAnalyzeTab(QWidget):
                 self.btn_toggle_cam.setText("Retake Snapshot")
                 self.state = "captured"
 
+    # get current webcam frame
     def update_frame(self):
         ret, frame = self.cap.read()
         if ret:
             self.frame = frame
             self.display_image(frame)
 
+    # display frame
     def display_image(self, frame):
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame_rgb.shape
         qt_image = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
-        qt_image = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qt_image).scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(pixmap)
 
+    # manually crop region from frame
     def crop_roi(self):
         if self.frame is not None:
             roi = cv2.selectROI("Select ROI", self.frame, False, False)
@@ -309,24 +256,9 @@ class CaptureAnalyzeTab(QWidget):
                     cropped = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
                 self.frame = cropped
-                cropped = self.frame[y:y + h, x:x + w]
-                if cropped.size == 0:
-                    QMessageBox.warning(self, "Invalid ROI", "Selected area is empty.")
-                    return
-
-                min_w, min_h = 400, 300
-                ch, cw = cropped.shape[:2]
-                if cw < min_w or ch < min_h:
-                    scale_w = min_w / cw
-                    scale_h = min_h / ch
-                    scale = max(scale_w, scale_h)
-                    new_w, new_h = int(cw * scale), int(ch * scale)
-                    cropped = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-                self.frame = cropped
                 self.display_image(cropped)
 
-
+    # placeholder analysis
     def run_analysis(self):
         if self.frame is None:
             QMessageBox.information(self, "No snapshot", "Please take a snapshot first.")
@@ -353,22 +285,18 @@ class CaptureAnalyzeTab(QWidget):
         self.display_image(annotated)
         QMessageBox.information(self, "Saved", f"Annotated snapshot saved as {out_path}")
 
-    def dummy_analysis(self):
-        self.run_analysis()
-        self.run_analysis()
 
-
+# tab 3: placeholder for model training and prediction
 class TrainPredictTab(QWidget):
     def __init__(self, date_selector: QDateEdit, parent=None):
-    def __init__(self, date_selector: QDateEdit, parent=None):
         super().__init__(parent)
-        self.date_selector = date_selector
         self.date_selector = date_selector
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
 
+        # training area
         train_box = QGroupBox("Training")
         train_layout = QVBoxLayout(train_box)
         self.btn_upload_train = QPushButton("Upload Training Images and Labels")
@@ -379,6 +307,7 @@ class TrainPredictTab(QWidget):
         train_layout.addWidget(self.btn_train_model)
         train_layout.addWidget(self.train_log)
 
+        # prediction area
         pred_box = QGroupBox("Prediction")
         pred_layout = QVBoxLayout(pred_box)
         self.btn_select_image = QPushButton("Select Image to Predict")
@@ -395,9 +324,11 @@ class TrainPredictTab(QWidget):
         layout.addWidget(train_box)
         layout.addWidget(pred_box)
 
+        # button handlers
         self.btn_select_image.clicked.connect(self.load_image_pred)
         self.btn_train_model.clicked.connect(self.dummy_train_model)
 
+    # placeholder prediction
     def load_image_pred(self):
         fname, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
         if fname:
@@ -435,6 +366,7 @@ class TrainPredictTab(QWidget):
         self.train_log.append("Training complete. Model saved to model.pth")
 
 
+# main window container
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -446,12 +378,10 @@ class MainWindow(QMainWindow):
         central = QWidget()
         main_layout = QVBoxLayout(central)
 
+        # header with title and date
         header_layout = QHBoxLayout()
         title_label = QLabel("Sustainability Assessment")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold;")
-        self.date_edit = QDateEdit(QDate.currentDate())
-        self.date_edit.setDisplayFormat("dd/MM/yyyy")
-        self.date_edit.setCalendarPopup(True)
         self.date_edit = QDateEdit(QDate.currentDate())
         self.date_edit.setDisplayFormat("dd/MM/yyyy")
         self.date_edit.setCalendarPopup(True)
@@ -459,22 +389,19 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
         header_layout.addWidget(QLabel("Date:"))
         header_layout.addWidget(self.date_edit)
-        header_layout.addWidget(self.date_edit)
 
+        # tab view
         tabs = QTabWidget()
-        tabs.addTab(UploadAnalyzeTab(self.date_edit), "Upload Assess")
-        tabs.addTab(CaptureAnalyzeTab(self.date_edit), "Capture Assess")
-        tabs.addTab(TrainPredictTab(self.date_edit), "Train Predict")
-        tabs.addTab(UploadAnalyzeTab(self.date_edit), "Upload Assess")
-        tabs.addTab(CaptureAnalyzeTab(self.date_edit), "Capture Assess")
-        tabs.addTab(TrainPredictTab(self.date_edit), "Train Predict")
+        tabs.addTab(UploadAnalyzeTab(self.date_edit), "Upload && Assess")
+        tabs.addTab(CaptureAnalyzeTab(self.date_edit), "Capture && Assess")
+        tabs.addTab(TrainPredictTab(self.date_edit), "Train && Predict")
 
         main_layout.addLayout(header_layout)
         main_layout.addWidget(tabs)
 
         self.setCentralWidget(central)
 
-
+# app entry point
 def main():
     app = QApplication(sys.argv)
     window = MainWindow()
