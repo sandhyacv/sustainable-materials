@@ -1,3 +1,5 @@
-__pycache__
+trashnet/
+__pycache__/
+analyzed_snapshots/
 *.pyc
-analyzed_snapshots
+*.pth
