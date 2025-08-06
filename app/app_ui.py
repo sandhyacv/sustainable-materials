@@ -1,3 +1,4 @@
+import os
 import sys
 import cv2
 from datetime import datetime
@@ -12,7 +13,16 @@ import torchvision.transforms as transforms
 from torchvision.models import resnet18
 
 # load model
-model_path = "model_training/trashnet_model.pth"
+def get_resource_path(relative_path):
+    """Get the absolute path to a resource, whether running as a script or executable."""
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+model_path = get_resource_path("model_training/trashnet_model.pth")
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model = resnet18(weights=None)

@@ -3,3 +3,5 @@ __pycache__/
 analyzed_snapshots/
 *.pyc
 *.pth
+build/
+dist/
